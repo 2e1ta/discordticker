@@ -1,0 +1,1 @@
+-r discord_stocker/requirements.txt
