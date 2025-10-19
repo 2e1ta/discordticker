@@ -1,0 +1,6 @@
+discord.py==2.3.2
+yfinance
+pandas
+numpy
+psycopg2-binary
+Flask
