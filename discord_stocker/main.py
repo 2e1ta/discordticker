@@ -1,4 +1,8 @@
 import os
+
+# Render の Python 3.13 では audioop モジュールが無いため、音声機能を無効化
+os.environ.setdefault("DISCORD_DISABLE_VOICE", "1")
+
 import discord
 from discord import app_commands
 from discord.ext import tasks
