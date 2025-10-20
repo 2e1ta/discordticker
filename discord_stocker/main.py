@@ -103,7 +103,12 @@ async def cancel(interaction: discord.Interaction, ticker: str):
 
 @tree.command(name="price", description="現在の株価を表示")
 async def price(interaction: discord.Interaction, ticker: str):
-    await interaction.response.defer()
+    try:
+        await interaction.response.defer(thinking=True)
+    except discord.NotFound:
+        if interaction.channel:
+            await interaction.channel.send("⏱応答がタイムアウトしました。もう一度お試しください。")
+        return
     ticker_with_suffix = ticker if ticker.endswith(".T") else f"{ticker}.T"
     current_price = get_stock_price(ticker_with_suffix)
     if current_price is not None:
@@ -154,7 +159,8 @@ async def show(interaction: discord.Interaction):
         await interaction.response.defer(thinking=True)
     except discord.NotFound:
         # Interaction token expired before we could acknowledge; fall back to notifying in channel
-        await interaction.channel.send("⏱応答がタイムアウトしました。もう一度お試しください。")
+        if interaction.channel:
+            await interaction.channel.send("⏱応答がタイムアウトしました。もう一度お試しください。")
         return
     try:
         conn = get_db_connection()
