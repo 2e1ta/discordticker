@@ -150,7 +150,12 @@ async def show(interaction: discord.Interaction):
     if guild_id is None:
         await interaction.response.send_message("❌このコマンドはサーバー内でのみ使用できます")
         return
-    await interaction.response.defer()
+    try:
+        await interaction.response.defer(thinking=True)
+    except discord.NotFound:
+        # Interaction token expired before we could acknowledge; fall back to notifying in channel
+        await interaction.channel.send("⏱応答がタイムアウトしました。もう一度お試しください。")
+        return
     try:
         conn = get_db_connection()
         cur = conn.cursor()
