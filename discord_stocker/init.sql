@@ -1,4 +1,6 @@
-CREATE TABLE IF NOT EXISTS portfolio (
+DROP TABLE IF EXISTS portfolio;
+
+CREATE TABLE portfolio (
     id SERIAL PRIMARY KEY,
     guild_id BIGINT NOT NULL,
     user_id BIGINT NOT NULL,
@@ -7,6 +9,3 @@ CREATE TABLE IF NOT EXISTS portfolio (
     quantity INT NOT NULL,
     created_at TIMESTAMP DEFAULT NOW()
 );
-
-ALTER TABLE portfolio
-    ADD COLUMN IF NOT EXISTS guild_id BIGINT;
