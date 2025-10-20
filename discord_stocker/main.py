@@ -121,12 +121,16 @@ async def set_stock(
     interaction: discord.Interaction, ticker: str, purchase_price: float, quantity: int
 ):
     ticker_with_suffix = ticker if ticker.endswith(".T") else f"{ticker}.T"
+    guild_id = interaction.guild_id
+    if guild_id is None:
+        await interaction.response.send_message("❌このコマンドはサーバー内でのみ使用できます")
+        return
     try:
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute(
-            "INSERT INTO portfolio (user_id, ticker, purchase_price, quantity) VALUES (%s, %s, %s, %s)",
-            (interaction.user.id, ticker_with_suffix, purchase_price, quantity),
+            "INSERT INTO portfolio (guild_id, user_id, ticker, purchase_price, quantity) VALUES (%s, %s, %s, %s, %s)",
+            (guild_id, interaction.user.id, ticker_with_suffix, purchase_price, quantity),
         )
         conn.commit()
         cur.close()
@@ -142,13 +146,17 @@ async def set_stock(
 
 @tree.command(name="show", description="ポートフォリオを表示")
 async def show(interaction: discord.Interaction):
+    guild_id = interaction.guild_id
+    if guild_id is None:
+        await interaction.response.send_message("❌このコマンドはサーバー内でのみ使用できます")
+        return
     await interaction.response.defer()
     try:
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute(
-            "SELECT ticker, purchase_price, quantity FROM portfolio WHERE user_id = %s ORDER BY ticker, created_at",
-            (interaction.user.id,),
+            "SELECT ticker, purchase_price, quantity FROM portfolio WHERE guild_id = %s ORDER BY ticker, created_at",
+            (guild_id,),
         )
         holdings = cur.fetchall()
         cur.close()
@@ -207,12 +215,16 @@ async def sell(
     interaction: discord.Interaction, ticker: str, quantity: int, sell_price: float
 ):
     ticker_with_suffix = ticker if ticker.endswith(".T") else f"{ticker}.T"
+    guild_id = interaction.guild_id
+    if guild_id is None:
+        await interaction.response.send_message("❌このコマンドはサーバー内でのみ使用できます")
+        return
     try:
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute(
-            "SELECT id, purchase_price, quantity FROM portfolio WHERE user_id = %s AND ticker = %s ORDER BY created_at",
-            (interaction.user.id, ticker_with_suffix),
+            "SELECT id, purchase_price, quantity FROM portfolio WHERE guild_id = %s AND ticker = %s ORDER BY created_at",
+            (guild_id, ticker_with_suffix),
         )
         holdings = cur.fetchall()
 
