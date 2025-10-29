@@ -94,6 +94,29 @@ def get_stock_price(ticker: str) -> Optional[float]:
         return None
 
 
+
+
+def get_stock_price_with_change(ticker: str) -> tuple[Optional[float], Optional[float], Optional[float]]:
+    """株価、前日比率、前日終値を取得"""
+    try:
+        stock = yf.Ticker(ticker)
+        data = stock.history(period="5d")
+        if not data.empty and len(data) >= 1:
+            current_price = float(data["Close"].iloc[-1])
+            prev_close = None
+            daily_change_pct = None
+
+            if len(data) >= 2:
+                prev_close = float(data["Close"].iloc[-2])
+                daily_change_pct = ((current_price - prev_close) / prev_close) * 100
+
+            return current_price, daily_change_pct, prev_close
+        return None, None, None
+    except Exception as e:
+        print(f"[{datetime.now()}] Error fetching price for {ticker}: {e}")
+        return None, None, None
+
+
 def get_company_info(ticker: str) -> Optional[Dict[str, str]]:
     """kabutanから企業情報を取得"""
     ticker_code = ticker.replace(".T", "")
@@ -442,18 +465,23 @@ async def show(interaction: discord.Interaction):
         total_quantity = sum(p["quantity"] for p in positions)
         invested = sum(p["purchase_price"] * p["quantity"] for p in positions)
         avg_purchase = invested / total_quantity if total_quantity else 0
-        current_price = get_stock_price(ticker)
+        current_price, daily_change_pct, prev_close = get_stock_price_with_change(ticker)
         if current_price is not None:
             current_value = current_price * total_quantity
             profit = current_value - invested
             profit_pct = (profit / invested) * 100 if invested else 0.0
-            message_lines.extend([
-                display_name,
-                f"　購入: {avg_purchase:.2f}円 × {total_quantity}株",
-                f"　現在: {current_price:.2f}円",
-                f"　損益: {profit:+,.0f}円 ({profit_pct:+.2f}%)",
-                "",
-            ])
+
+            # メッセージ行を構築
+            lines = [display_name]
+            lines.append(f"　購入: {avg_purchase:.2f}円 × {total_quantity}株")
+            if daily_change_pct is not None:
+                lines.append(f"　現在: {current_price:.2f}円 (本日 {daily_change_pct:+.2f}%)")
+            else:
+                lines.append(f"　現在: {current_price:.2f}円")
+            lines.append(f"　損益: {profit:+,.0f}円 ({profit_pct:+.2f}%)")
+            lines.append("")
+
+            message_lines.extend(lines)
             total_invested += invested
             total_current += current_value
         else:
@@ -467,11 +495,31 @@ async def show(interaction: discord.Interaction):
     if total_invested > 0:
         total_profit = total_current - total_invested
         total_profit_pct = (total_profit / total_invested) * 100
+
+        # 全体の前日比計算
+        total_prev_value = 0
+        for ticker, positions in portfolio_by_ticker.items():
+            total_quantity = sum(p["quantity"] for p in positions)
+            try:
+                stock = yf.Ticker(ticker)
+                data = stock.history(period="5d")
+                if not data.empty and len(data) >= 2:
+                    prev_close = float(data["Close"].iloc[-2])
+                    total_prev_value += prev_close * total_quantity
+            except:
+                pass
+
+        message_lines.append("")
         message_lines.extend([
             f"投資額: {total_invested:,.0f}円",
             f"評価額: {total_current:,.0f}円",
             f"損益: {total_profit:+,.0f}円 ({total_profit_pct:+.2f}%)",
         ])
+
+        if total_prev_value > 0:
+            total_daily_change_pct = ((total_current - total_prev_value) / total_prev_value) * 100
+            message_lines.append(f"本日変動: {total_daily_change_pct:+.2f}%")
+
     await interaction.followup.send("\n".join(message_lines))
 
 @tree.command(name="sell", description="株を売却")
