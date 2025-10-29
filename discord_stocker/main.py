@@ -9,7 +9,9 @@ from discord.ext import tasks
 import yfinance as yf
 import psycopg2
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Dict
+import requests
+from lxml import html
 
 # HTTPサーバ（UptimeRobot用）
 from keep_alive import start_server
@@ -24,6 +26,9 @@ tree = app_commands.CommandTree(client)
 
 alerts = []
 alert_id_counter = 1
+
+# 企業名キャッシュ（メモリ内）
+company_name_cache: Dict[str, str] = {}
 
 
 def get_db_connection():
@@ -89,6 +94,80 @@ def get_stock_price(ticker: str) -> Optional[float]:
         return None
 
 
+def get_company_info(ticker: str) -> Optional[Dict[str, str]]:
+    """kabutanから企業情報を取得"""
+    ticker_code = ticker.replace(".T", "")
+    url = f"https://kabutan.jp/stock/?code={ticker_code}"
+
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        tree = html.fromstring(response.content)
+
+        # 企業名
+        company_name_elements = tree.xpath('/html/body/div[1]/div[3]/div[1]/div[4]/div[4]/h3')
+        company_name = company_name_elements[0].text_content().strip() if company_name_elements else None
+
+        # 事業概要
+        business_elements = tree.xpath('/html/body/div[1]/div[3]/div[1]/div[4]/div[4]/table/tbody/tr[3]/td')
+        business_description = business_elements[0].text_content().strip() if business_elements else None
+
+        # 企業URL
+        url_elements = tree.xpath('/html/body/div[1]/div[3]/div[1]/div[4]/div[4]/table/tbody/tr[2]/td/a')
+        company_url = url_elements[0].get('href') if url_elements else None
+
+        # 企業名をキャッシュ
+        if company_name:
+            company_name_cache[ticker] = company_name
+
+        return {
+            'company_name': company_name,
+            'business_description': business_description,
+            'company_url': company_url
+        }
+
+    except Exception as e:
+        print(f"[{datetime.now()}] Error fetching company info for {ticker}: {e}")
+        return None
+
+
+def get_company_name(ticker: str) -> str:
+    """企業名を取得（キャッシュがあればキャッシュから）"""
+    if ticker in company_name_cache:
+        return company_name_cache[ticker]
+
+    info = get_company_info(ticker)
+    if info and info['company_name']:
+        return info['company_name']
+
+    return ""
+
+
+@tree.command(name="about", description="企業情報を表示")
+async def about(interaction: discord.Interaction, ticker: str):
+    try:
+        await interaction.response.defer(thinking=True)
+    except discord.NotFound:
+        await notify_interaction_timeout(interaction)
+        return
+
+    ticker_with_suffix = ticker if ticker.endswith(".T") else f"{ticker}.T"
+    info = get_company_info(ticker_with_suffix)
+
+    if info and info['company_name']:
+        message_lines = [
+            f"**{info['company_name']}** ({ticker_with_suffix})",
+            "",
+            f"**企業URL:** {info['company_url'] or '不明'}",
+            "",
+            f"**事業概要:**",
+            info['business_description'] or '情報なし'
+        ]
+        await interaction.followup.send("\n".join(message_lines))
+    else:
+        await interaction.followup.send(f"❌{ticker_with_suffix} の企業情報を取得できませんでした")
+
+
 @tree.command(name="alert_above", description="指定価格以上になったら通知")
 async def alert_above(interaction: discord.Interaction, ticker: str, price: float):
     global alert_id_counter
@@ -103,8 +182,12 @@ async def alert_above(interaction: discord.Interaction, ticker: str, price: floa
     }
     alerts.append(alert)
     alert_id_counter += 1
+
+    company_name = get_company_name(ticker_with_suffix)
+    display_name = f"{company_name} ({ticker_with_suffix})" if company_name else ticker_with_suffix
+
     await interaction.response.send_message(
-        f"✅アラート登録:\n{ticker_with_suffix} が {price}円以上になったら通知します"
+        f"✅アラート登録:\n{display_name} が {price}円以上になったら通知します"
     )
 
 
@@ -122,8 +205,12 @@ async def alert_below(interaction: discord.Interaction, ticker: str, price: floa
     }
     alerts.append(alert)
     alert_id_counter += 1
+
+    company_name = get_company_name(ticker_with_suffix)
+    display_name = f"{company_name} ({ticker_with_suffix})" if company_name else ticker_with_suffix
+
     await interaction.response.send_message(
-        f"✅アラート登録:\n{ticker_with_suffix} が {price}円以下になったら通知します"
+        f"✅アラート登録:\n{display_name} が {price}円以下になったら通知します"
     )
 
 
@@ -138,13 +225,17 @@ async def cancel(interaction: discord.Interaction, ticker: str):
         if not (a["ticker"] == ticker_with_suffix and a["user"] == interaction.user.id)
     ]
     removed_count = original_count - len(alerts)
+
+    company_name = get_company_name(ticker_with_suffix)
+    display_name = f"{company_name} ({ticker_with_suffix})" if company_name else ticker_with_suffix
+
     if removed_count > 0:
         await interaction.response.send_message(
-            f"✅ {ticker_with_suffix} のアラートを {removed_count}件削除しました"
+            f"✅ {display_name} のアラートを {removed_count}件削除しました"
         )
     else:
         await interaction.response.send_message(
-            f"❌ {ticker_with_suffix} のアラートが見つかりませんでした"
+            f"❌ {display_name} のアラートが見つかりませんでした"
         )
 
 
@@ -157,6 +248,9 @@ async def price(interaction: discord.Interaction, ticker: str):
         return
     ticker_with_suffix = ticker if ticker.endswith(".T") else f"{ticker}.T"
     guild_id = interaction.guild_id
+
+    # 企業名取得
+    company_name = get_company_name(ticker_with_suffix)
 
     # 株価情報取得
     try:
@@ -184,8 +278,9 @@ async def price(interaction: discord.Interaction, ticker: str):
         return
 
     # メッセージ構築
+    display_name = f"{company_name} ({ticker_with_suffix})" if company_name else ticker_with_suffix
     message_lines = [
-        f"{ticker_with_suffix}",
+        display_name,
         f"現在価格: {current_price:.2f}円",
         f"本日変動: {daily_change_pct:+.2f}%",
         ""
@@ -266,6 +361,10 @@ async def set_stock(
         await notify_interaction_timeout(interaction)
         return
     ensure_portfolio_schema()
+
+    # 企業名取得
+    company_name = get_company_name(ticker_with_suffix)
+
     conn = None
     cur = None
     try:
@@ -277,8 +376,10 @@ async def set_stock(
         )
         conn.commit()
         total_cost = purchase_price * quantity
+
+        display_name = f"{company_name} ({ticker_with_suffix})" if company_name else ticker_with_suffix
         await interaction.followup.send(
-            f"仕込み登録:\n{ticker_with_suffix} - {quantity}株 @ {purchase_price:.2f}円\n合計 {total_cost:,.0f}円"
+            f"仕込み登録:\n{display_name} - {quantity}株 @ {purchase_price:.2f}円\n合計 {total_cost:,.0f}円"
         )
     except Exception as e:
         if conn is not None:
@@ -334,6 +435,10 @@ async def show(interaction: discord.Interaction):
     total_invested = 0
     total_current = 0
     for ticker, positions in portfolio_by_ticker.items():
+        # 企業名取得
+        company_name = get_company_name(ticker)
+        display_name = f"{company_name} ({ticker})" if company_name else ticker
+
         total_quantity = sum(p["quantity"] for p in positions)
         invested = sum(p["purchase_price"] * p["quantity"] for p in positions)
         avg_purchase = invested / total_quantity if total_quantity else 0
@@ -343,7 +448,7 @@ async def show(interaction: discord.Interaction):
             profit = current_value - invested
             profit_pct = (profit / invested) * 100 if invested else 0.0
             message_lines.extend([
-                f"{ticker}",
+                display_name,
                 f"　購入: {avg_purchase:.2f}円 × {total_quantity}株",
                 f"　現在: {current_price:.2f}円",
                 f"　損益: {profit:+,.0f}円 ({profit_pct:+.2f}%)",
@@ -353,7 +458,7 @@ async def show(interaction: discord.Interaction):
             total_current += current_value
         else:
             message_lines.extend([
-                f"{ticker}",
+                display_name,
                 f"　購入: {avg_purchase:.2f}円 × {total_quantity}株",
                 "　現在: 取得失敗",
                 "",
@@ -384,6 +489,11 @@ async def sell(
         await notify_interaction_timeout(interaction)
         return
     ensure_portfolio_schema()
+
+    # 企業名取得
+    company_name = get_company_name(ticker_with_suffix)
+    display_name = f"{company_name} ({ticker_with_suffix})" if company_name else ticker_with_suffix
+
     conn = None
     cur = None
     try:
@@ -395,7 +505,7 @@ async def sell(
         )
         holdings = cur.fetchall()
         if not holdings:
-            await interaction.followup.send(f"❌{ticker_with_suffix} の保有がありません")
+            await interaction.followup.send(f"❌{display_name} の保有がありません")
             return
         total_quantity = sum(h[2] for h in holdings)
         if quantity > total_quantity:
@@ -426,7 +536,7 @@ async def sell(
         profit = revenue - total_cost
         profit_pct = (profit / total_cost) * 100 if total_cost else 0.0
         message_lines = [
-            f"売却完了: {ticker_with_suffix}",
+            f"売却完了: {display_name}",
             "",
             f"売却株数: {quantity}株",
             f"平均取得単価: {avg_purchase:.2f}円",

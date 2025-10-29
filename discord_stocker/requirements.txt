@@ -4,3 +4,5 @@ pandas
 numpy
 psycopg2-binary
 Flask
+requests
+lxml
