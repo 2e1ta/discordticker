@@ -67,21 +67,6 @@ def ensure_portfolio_schema():
             conn.close()
 
 
-async def notify_interaction_timeout(interaction: discord.Interaction) -> None:
-    message = "⏱応答がタイムアウトしました。もう一度お試しください。"
-    channel = interaction.channel
-    if channel is not None:
-        try:
-            await channel.send(message)
-            return
-        except (discord.Forbidden, discord.HTTPException):
-            pass
-    try:
-        await interaction.user.send(message)
-    except (discord.Forbidden, discord.HTTPException):
-        pass
-
-
 def get_stock_price(ticker: str) -> Optional[float]:
     try:
         stock = yf.Ticker(ticker)
@@ -168,11 +153,7 @@ def get_company_name(ticker: str) -> str:
 
 @tree.command(name="about", description="企業情報を表示")
 async def about(interaction: discord.Interaction, ticker: str):
-    try:
-        await interaction.response.defer(thinking=True)
-    except discord.NotFound:
-        await notify_interaction_timeout(interaction)
-        return
+    await interaction.response.defer(thinking=True)
 
     ticker_with_suffix = ticker if ticker.endswith(".T") else f"{ticker}.T"
     info = get_company_info(ticker_with_suffix)
@@ -264,14 +245,8 @@ async def cancel(interaction: discord.Interaction, ticker: str):
 
 @tree.command(name="price", description="現在の株価を表示")
 async def price(interaction: discord.Interaction, ticker: str):
-    try:
-        await interaction.response.defer(thinking=True)
-    except discord.NotFound:
-        await notify_interaction_timeout(interaction)
-        return
+    await interaction.response.defer(thinking=True)
     ticker_with_suffix = ticker if ticker.endswith(".T") else f"{ticker}.T"
-    guild_id = interaction.guild_id
-
     # 企業名取得
     company_name = get_company_name(ticker_with_suffix)
 
@@ -319,11 +294,7 @@ async def set_stock(
     if guild_id is None:
         await interaction.response.send_message("❌このコマンドはサーバー内でのみ使用できます")
         return
-    try:
-        await interaction.response.defer(thinking=True)
-    except discord.NotFound:
-        await notify_interaction_timeout(interaction)
-        return
+    await interaction.response.defer(thinking=True)
     ensure_portfolio_schema()
 
     # 企業名取得
@@ -361,11 +332,7 @@ async def show(interaction: discord.Interaction):
     if guild_id is None:
         await interaction.response.send_message("❌このコマンドはサーバー内でのみ使用できます")
         return
-    try:
-        await interaction.response.defer(thinking=True)
-    except discord.NotFound:
-        await notify_interaction_timeout(interaction)
-        return
+    await interaction.response.defer(thinking=True)
     ensure_portfolio_schema()
     conn = None
     cur = None
@@ -472,11 +439,7 @@ async def sell(
     if guild_id is None:
         await interaction.response.send_message("❌このコマンドはサーバー内でのみ使用できます")
         return
-    try:
-        await interaction.response.defer(thinking=True)
-    except discord.NotFound:
-        await notify_interaction_timeout(interaction)
-        return
+    await interaction.response.defer(thinking=True)
     ensure_portfolio_schema()
 
     # 企業名取得
