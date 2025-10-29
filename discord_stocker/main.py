@@ -306,66 +306,7 @@ async def price(interaction: discord.Interaction, ticker: str):
         display_name,
         f"現在価格: {current_price:.2f}円",
         f"本日変動: {daily_change_pct:+.2f}%",
-        ""
     ]
-
-    # ポートフォリオ情報取得（サーバー内の場合のみ）
-    if guild_id is not None:
-        ensure_portfolio_schema()
-        conn = None
-        cur = None
-        try:
-            conn = get_db_connection()
-            cur = conn.cursor()
-
-            # 個人のポートフォリオ
-            cur.execute(
-                "SELECT purchase_price, quantity FROM portfolio WHERE guild_id = %s AND user_id = %s AND ticker = %s",
-                (guild_id, interaction.user.id, ticker_with_suffix)
-            )
-            user_holdings = cur.fetchall()
-
-            if user_holdings:
-                total_qty = sum(h[1] for h in user_holdings)
-                total_cost = sum(h[0] * h[1] for h in user_holdings)
-                avg_purchase = total_cost / total_qty if total_qty else 0
-                current_value = current_price * total_qty
-                profit = current_value - total_cost
-                profit_pct = (profit / total_cost) * 100 if total_cost else 0.0
-
-                message_lines.extend([
-                    f"あなたの損益: {profit:+,.0f}円 ({profit_pct:+.2f}%)",
-                    f"　保有: {total_qty}株 @ {avg_purchase:.2f}円",
-                ])
-
-            # サーバー全体のポートフォリオ
-            cur.execute(
-                "SELECT purchase_price, quantity FROM portfolio WHERE guild_id = %s AND ticker = %s",
-                (guild_id, ticker_with_suffix)
-            )
-            server_holdings = cur.fetchall()
-
-            if server_holdings:
-                total_qty = sum(h[1] for h in server_holdings)
-                total_cost = sum(h[0] * h[1] for h in server_holdings)
-                avg_purchase = total_cost / total_qty if total_qty else 0
-                current_value = current_price * total_qty
-                profit = current_value - total_cost
-                profit_pct = (profit / total_cost) * 100 if total_cost else 0.0
-
-                message_lines.extend([
-                    "",
-                    f"サーバー全体の損益: {profit:+,.0f}円 ({profit_pct:+.2f}%)",
-                    f"　保有: {total_qty}株 @ {avg_purchase:.2f}円",
-                ])
-
-        except Exception as e:
-            print(f"[{datetime.now()}] Error fetching portfolio: {e}")
-        finally:
-            if cur is not None:
-                cur.close()
-            if conn is not None:
-                conn.close()
 
     await interaction.followup.send("\n".join(message_lines))
 
